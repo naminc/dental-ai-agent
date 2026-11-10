@@ -2,11 +2,19 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+from openai import OpenAI
+
 logger = logging.getLogger(__name__)
 
-from src.core.settings import get_settings
-from src.providers.protocols import ChatProvider
-from src.retriever.query_expander import QueryExpander
+from src.config import (
+    OPENAI_API_KEY,
+    OPENAI_CHAT_MODEL,
+    OLLAMA_BASE_URL,
+    OLLAMA_CHAT_MODEL,
+    EMBEDDING_ENGINE,
+    LLM_ENGINE,
+    MULTI_QUERY_EXPANSION,
+)
 from src.retriever.search import Retriever
 from src.lib.constants import (
     AI_TEMPERATURE,
@@ -17,8 +25,6 @@ from src.lib.constants import (
     EXTRACT_CATEGORY_SYSTEM_PROMPT,
     EXTRACT_CATEGORY_USER_TEMPLATE,
 )
-
-settings = get_settings()
 
 
 class DentalChatbot:
@@ -33,18 +39,55 @@ class DentalChatbot:
     # Khởi tạo Chatbot
     def __init__(
         self,
-        chat_provider: ChatProvider,
-        llm_engine: str = settings.llm_engine.value,
-        embedding_engine: str = settings.embedding_engine.value,
-        retriever: Retriever | None = None,
+        llm_engine: str = LLM_ENGINE,
+        embedding_engine: str = EMBEDDING_ENGINE,
     ) -> None:
+        # Khởi tạo LLM Engine
         self.llm_engine: str = llm_engine
-        self.chat_provider = chat_provider
-        self.retriever = retriever or Retriever(
-            engine=embedding_engine,
-            llm_engine=llm_engine,
-            query_expander=QueryExpander(self.chat_provider),
-        )
+
+        if llm_engine == "openai":
+            if not OPENAI_API_KEY:
+                raise ValueError(
+                    "Thiếu OPENAI_API_KEY trong .env (bắt buộc khi LLM_ENGINE=openai)"
+                )
+            # Khởi tạo OpenAI Client & Chat Model
+            self.client = OpenAI(api_key=OPENAI_API_KEY)
+            self.chat_model: str = OPENAI_CHAT_MODEL
+
+        elif llm_engine == "local":
+            # Khởi tạo Ollama Client & Chat Model
+            self.client = OpenAI(
+                base_url=OLLAMA_BASE_URL,
+                api_key="ollama",
+            )
+            self.chat_model = OLLAMA_CHAT_MODEL
+            self._verify_ollama_connection()
+
+        else:
+            raise ValueError(
+                f"LLM engine '{llm_engine}' không hợp lệ. Chọn 'openai' hoặc 'local'."
+            )
+
+        # Khởi tạo Retriever & Embedding Engine
+        self.retriever = Retriever(engine=embedding_engine)
+
+    # Kiểm tra kết nối Ollama
+    def _verify_ollama_connection(self) -> None:
+        """Kiểm tra kết nối tới Ollama."""
+        try:
+            self.client.models.list()
+        except Exception:
+            raise ConnectionError(
+                f"\n{'=' * 60}\n"
+                f"  KHÔNG THỂ KẾT NỐI TỚI OLLAMA\n"
+                f"  URL: {OLLAMA_BASE_URL}\n"
+                f"  Model: {self.chat_model}\n\n"
+                f"  Hãy chắc chắn:\n"
+                f"    1. Ollama đã được cài đặt (https://ollama.com)\n"
+                f"    2. Ollama đang chạy: ollama serve\n"
+                f"    3. Model đã được pull: ollama pull {self.chat_model}\n"
+                f"{'=' * 60}"
+            )
 
     # Format lịch sử hội thoại cho prompt
     def format_history_for_prompt(self, chat_history):
@@ -78,7 +121,8 @@ class DentalChatbot:
             question=user_question,
         )
 
-        return self.chat_provider.complete(
+        response = self.client.chat.completions.create(
+            model=self.chat_model,
             messages=[
                 {"role": "system", "content": REWRITE_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
@@ -86,6 +130,7 @@ class DentalChatbot:
             temperature=AI_TEMPERATURE["STRICT"],
             max_tokens=100,
         )
+        return response.choices[0].message.content.strip()
 
     # Extract category từ query
     def extract_category(self, query: str) -> list[str] | None:
@@ -101,7 +146,9 @@ class DentalChatbot:
         )
 
         try:
-            result = self.chat_provider.complete(
+            # Gọi API OpenAI để trích xuất bệnh lý
+            response = self.client.chat.completions.create(
+                model=self.chat_model,
                 messages=[
                     {"role": "system", "content": EXTRACT_CATEGORY_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
@@ -109,6 +156,8 @@ class DentalChatbot:
                 temperature=AI_TEMPERATURE["STRICT"],
                 max_tokens=50,
             )
+
+            result = response.choices[0].message.content.strip()
 
             if result.upper() in ("NONE", "KHÔNG XÁC ĐỊNH", "KHÔNG RÕ", ""):
                 return None
@@ -166,7 +215,7 @@ class DentalChatbot:
             logger.info("[TIME-LOG] Extract Category mất: %.2fs", elapsed)
             return result
 
-        if settings.multi_query_expansion:
+        if MULTI_QUERY_EXPANSION:
             def _safe_expand():
                 t0 = time.perf_counter()
                 try:
@@ -213,19 +262,23 @@ class DentalChatbot:
         t_llm_start = time.perf_counter()
         t_first_token = None
 
-        response = self.chat_provider.stream(
+        response = self.client.chat.completions.create(
+            model=self.chat_model,
             messages=[
                 {"role": "system", "content": AI_SYSTEM_INSTRUCTIONS},
                 {"role": "user", "content": user_prompt}
             ],
             temperature=AI_TEMPERATURE["NORMAL"],
+            stream=True
         )
 
-        for content in response:
-            if t_first_token is None:
-                t_first_token = time.perf_counter() - t_llm_start
-                logger.info("[TIME-LOG] LLM Time-to-First-Token: %.2fs", t_first_token)
-            yield content
+        for chunk in response:
+            content = chunk.choices[0].delta.content
+            if content:
+                if t_first_token is None:
+                    t_first_token = time.perf_counter() - t_llm_start
+                    logger.info("[TIME-LOG] LLM Time-to-First-Token: %.2fs", t_first_token)
+                yield content
 
         t_llm_total = time.perf_counter() - t_llm_start
         logger.info("[TIME-LOG] LLM Generation tổng: %.2fs", t_llm_total)

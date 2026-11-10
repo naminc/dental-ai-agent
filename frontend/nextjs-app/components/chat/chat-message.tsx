@@ -50,6 +50,7 @@ const getSourceSiteLabel = (rawSource: string) => {
 // Props
 interface ChatMessageProps {
   message: Message;
+  index: number;
   isSourceOpen: boolean;
   onSourceToggle: (open: boolean) => void;
   previousMessage?: Message;
@@ -58,6 +59,7 @@ interface ChatMessageProps {
 // Chat Message Component
 export function ChatMessage({
   message,
+  index,
   isSourceOpen,
   onSourceToggle,
   previousMessage,

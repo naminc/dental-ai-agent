@@ -30,37 +30,22 @@ src/
 ├── agent/
 │   └── chatbot.py       ← RAG pipeline logic
 ├── retriever/
-│   ├── search.py        ← Retriever compatibility facade
-│   ├── index_store.py   ← Shared FAISS index + metadata loader
-│   ├── vector_searcher.py ← Vector similarity search
-│   ├── bm25_searcher.py ← Tokenization + keyword search
-│   ├── query_expander.py ← Query variants from injected LLM client
-│   ├── category_matcher.py ← Category pre-filter
-│   ├── rrf_ranker.py    ← RRF merge + overview boost
-│   ├── retrieval_service.py ← Pipeline orchestration
+│   ├── search.py        ← Hybrid search
 │   ├── ingest.py        ← FAISS index builder
-│   └── engines.py       ← Compatibility embedding factory
-├── providers/
-│   ├── protocols.py     ← Chat, stream, embedding, expansion interfaces
-│   ├── chat.py          ← OpenAI and Ollama-compatible chat adapters
-│   ├── embedding.py     ← OpenAI and local embedding adapters
-│   ├── factory.py       ← Process-cached provider construction
-│   └── errors.py        ← Safe application-level provider errors
+│   └── engines.py       ← Embedding engines
 ├── database/
 │   ├── database.py      ← SQLAlchemy engine (connection pool) & session
 │   └── models.py        ← ORM models
 ├── lib/
 │   └── constants.py     ← All prompts & AI config
-├── core/settings.py     ← Validated pydantic-settings configuration
-└── config.py            ← Backward-compatible config aliases
+└── config.py            ← Centralized .env config
 ```
 
 ### Nguyên tắc tổ chức
 
 - **Domain-driven:** Mỗi domain (chat, auth) là 1 package riêng với router + schemas + dependencies
 - **Separation of Concerns:** `main.py` chỉ setup app + CORS + include routers; `lifespan.py` quản lý startup/shutdown; `exception_handlers.py` xử lý lỗi toàn cục
-- **Config tập trung:** Mọi biến môi trường qua `core/settings.py`, mọi prompt qua `constants.py`
-- **Provider boundary:** Chatbot và retrieval chỉ phụ thuộc protocol; OpenAI SDK chỉ xuất hiện trong `providers/`
+- **Config tập trung:** Mọi biến môi trường qua `config.py`, mọi prompt qua `constants.py`
 
 ---
 
@@ -71,19 +56,29 @@ src/
 from api.lifespan import lifespan
 from api.exception_handlers import register_exception_handlers
 
+models.Base.metadata.create_all(bind=engine)
+
 app = FastAPI(title="Dental AI API", version="1.0.0", lifespan=lifespan)
 register_exception_handlers(app)
 
-app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, ...)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], ...)
 
 app.include_router(auth_router.router)   # /api/auth/*
 app.include_router(chat_router.router)   # /api/chat/*
 ```
 
 ```python
-# api/lifespan.py — Startup không gọi dependency ngoài; Shutdown: dispose pool
+# api/lifespan.py — Startup: kiểm tra DB + pre-warm chatbot; Shutdown: dispose pool
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Kiểm tra kết nối DB bằng SELECT 1
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as e:
+        logger.error("[KHỞI ĐỘNG] Kết nối database THẤT BẠI: %s", e)
+
+    get_chatbot()   # Pre-warm: load FAISS + sbert + BM25
     yield
     engine.dispose()  # Giải phóng toàn bộ connection pool
 ```
@@ -96,13 +91,11 @@ def register_exception_handlers(app: FastAPI):
         return JSONResponse(status_code=503, content={"detail": "..."})
 ```
 
-`main.py` chỉ làm các việc:
-1. Khởi tạo FastAPI và đăng ký exception handlers.
-2. Cấu hình CORS middleware.
-3. Cung cấp `/health` và `/ready`.
-4. Include 2 routers: `/api/auth/*` và `/api/chat/*`.
-
-Database schema được quản lý riêng bằng Alembic; application startup không tạo bảng hoặc chạy migration. Chatbot/retriever được lazy-load khi endpoint chat cần dùng.
+`main.py` chỉ làm 4 việc:
+1. Tạo database tables (`models.Base.metadata.create_all`) — idempotent, đảm bảo schema có sẵn
+2. Import `lifespan` từ `api/lifespan.py` để **kiểm tra DB + pre-warm** `DentalChatbot` ngay khi server start, và **dispose connection pool** khi shutdown
+3. Cấu hình CORS middleware (mở cho mọi origin trong dev; **nên siết lại** cho production)
+4. Include 2 routers: `/api/auth/*` và `/api/chat/*`
 
 ### Database Connection Pool (Production)
 
@@ -111,9 +104,9 @@ Database schema được quản lý riêng bằng Alembic; application startup k
 | Tham số | Giá trị | Tác dụng |
 |---|---|---|
 | `pool_pre_ping` | `True` | Kiểm tra connection còn sống trước khi dùng (fix lỗi `MySQL server has gone away`) |
-| `pool_recycle` | `280` | Tái tạo connection trước timeout thường gặp của MySQL |
-| `pool_size` | `5` | Số connection thường trực trên mỗi worker |
-| `max_overflow` | `10` | Số connection tạm thêm trên mỗi worker (tổng max = 15) |
+| `pool_recycle` | `1800` | Tái tạo connection sau 30 phút (tránh MySQL timeout) |
+| `pool_size` | `10` | Số connection thường trực trong pool |
+| `max_overflow` | `20` | Số connection tạm thêm khi traffic cao (tổng max = 30) |
 | `pool_timeout` | `30` | Chờ tối đa 30s để lấy connection từ pool |
 
 Ngoài ra, event listener `checkout` kiểm tra connection bằng `SELECT 1` mỗi khi lấy ra khỏi pool (dự phòng cho `pool_pre_ping`). Nếu connection đã chết → tự tạo mới, không để backend crash.
@@ -131,7 +124,7 @@ Ngoài ra, event listener `checkout` kiểm tra connection bằng `SELECT 1` m�
 
 Nếu khởi tạo ngay khi server start → chậm startup. Nếu khởi tạo mỗi request → lãng phí tài nguyên.
 
-### Giải pháp: Singleton + lazy initialization
+### Giải pháp: Singleton + Lifespan Pre-warm
 
 ```python
 # src/chat/dependencies.py
@@ -149,7 +142,7 @@ def get_chatbot() -> DentalChatbot:
 
 - **Singleton:** Các request sau dùng chung instance, không tạo mới
 - **DI-compatible:** Inject qua `Depends(get_chatbot)` trong FastAPI
-- **Lazy-load:** request chat đầu tiên mới khởi tạo chatbot; lỗi provider/model trả 503 nhưng không làm chết web process
+- **Pre-warm:** `api/main.py` gọi `get_chatbot()` ngay trong `lifespan` trước khi nhận request đầu tiên → tránh cold-start (~5–8 s) cho người dùng đầu tiên
 
 ### Sử dụng trong Router
 

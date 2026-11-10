@@ -23,8 +23,7 @@ Hệ thống **Retrieval-Augmented Generation (RAG)** chuyên sâu cho lĩnh v�
 DA14_AI_Dental_Agent/
 ├── api/
 │   ├── main.py                   # FastAPI entry point (CORS, routers)
-│   ├── lifespan.py               # Logging lifecycle; shutdown dispose database pool
-│   ├── security.py               # Security headers không buffer SSE
+│   ├── lifespan.py               # Startup/shutdown (kiểm tra DB, init chatbot, dispose pool)
 │   └── exception_handlers.py     # Xử lý lỗi DB toàn cục (trả 503 thay vì crash)
 ├── src/
 │   ├── agent/
@@ -32,9 +31,7 @@ DA14_AI_Dental_Agent/
 │   ├── retriever/
 │   │   ├── engines.py            # Strategy Pattern cho Embedding (Local/OpenAI)
 │   │   ├── ingest.py             # Pipeline xây dựng FAISS index
-│   │   ├── search.py             # Facade tương thích Retriever cũ
-│   │   ├── index_store.py        # Load/cache FAISS index và metadata
-│   │   └── retrieval_service.py  # Điều phối FAISS + BM25 + RRF + category matching
+│   │   └── search.py             # Hybrid Search: FAISS + BM25 + RRF + Multi-Query + Overview Boost
 │   ├── chat/
 │   │   ├── router.py             # Endpoints /api/chat/*
 │   │   ├── schemas.py            # Pydantic models
@@ -46,13 +43,10 @@ DA14_AI_Dental_Agent/
 │   ├── database/
 │   │   ├── database.py           # SQLAlchemy engine (connection pool, pre_ping, recycle) & session
 │   │   └── models.py             # User, ChatSession, Message
-│   ├── providers/                # OpenAI/Ollama/local adapters và provider protocols
-│   ├── core/
-│   │   └── settings.py           # pydantic-settings, validation và .env
-│   ├── embedding/                # Compatibility module cho embedding
+│   ├── embedding/                # Module cũ (đã được thay bằng src/retriever/engines.py)
 │   ├── lib/
 │   │   └── constants.py          # Toàn bộ prompt templates + AI_TEMPERATURE
-│   └── config.py                 # Backward-compatible aliases sang Settings
+│   └── config.py                 # Đọc .env, cấu hình tập trung
 ├── data/
 │   ├── raw/
 │   │   ├── dental_dataset.json      # Dataset gốc (762 bài, plain text)
@@ -76,9 +70,7 @@ DA14_AI_Dental_Agent/
 │   └── question/                 # Bộ câu hỏi test (on-topic / off-topic)
 ├── docs/                         # Toàn bộ tài liệu chi tiết (xem bảng mục §6)
 ├── start_ollama.bat              # Script bật Ollama đã tối ưu (GPU, Flash-Attention, Keep-Alive)
-├── pyproject.toml                # Direct dependencies + dependency groups
-├── uv.lock                       # Reproducible Python 3.11 lockfile
-├── requirements.txt              # Pinned production export cho pip/aaPanel
+├── requirements.txt              # Python dependencies
 ├── .env.example                  # Mẫu file môi trường
 └── README.md
 ```
@@ -87,7 +79,7 @@ DA14_AI_Dental_Agent/
 
 | Thành phần | Phiên bản | Bắt buộc? |
 |---|---|---|
-| Python | 3.11.x | Có |
+| Python | 3.10+ | Có |
 | Node.js | 18+ | Có (chạy frontend) |
 | MySQL / MariaDB | 8.0+ / 10.6+ | Có (lưu user + chat history) |
 | Ollama | 0.3+ | Tùy chọn (nếu dùng engine `local` cho LLM) |
@@ -104,11 +96,14 @@ DA14_AI_Dental_Agent/
 git clone https://github.com/naminc/DA14_AI_Dental_Agent.git
 cd DA14_AI_Dental_Agent
 
-python -m pip install uv
-uv sync --frozen
-```
+python -m venv .venv
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+# macOS / Linux
+source .venv/bin/activate
 
-Nếu dùng local embedding, cài thêm model stack bằng `uv sync --frozen --extra local-embedding`.
+pip install -r requirements.txt
+```
 
 ### 4.2. Cấu hình biến môi trường
 
@@ -122,8 +117,6 @@ Các biến quan trọng (xem đầy đủ trong [`.env.example`](./.env.example
 
 ```env
 # Engine lựa chọn (thay đổi runtime chỉ qua .env)
-APP_ENV=development              # production trên máy chủ
-CORS_ORIGINS=["http://localhost:3000"]
 EMBEDDING_ENGINE=local          # local | openai
 LLM_ENGINE=openai               # openai | local
 
@@ -155,11 +148,7 @@ CREATE DATABASE dental_agent_db
   COLLATE utf8mb4_unicode_ci;
 ```
 
-Tạo hoặc cập nhật schema bằng Alembic trước khi start backend:
-
-```bash
-uv run alembic upgrade head
-```
+Các bảng (`users`, `chat_sessions`, `messages`) sẽ được **SQLAlchemy tự tạo** khi backend khởi động lần đầu (`models.Base.metadata.create_all` trong `api/main.py`).
 
 ### 4.4. Xây dựng FAISS index (bắt buộc, chạy 1 lần)
 
@@ -195,42 +184,22 @@ OLLAMA_MAX_LOADED_MODELS=1 ollama serve
 ### 4.6. Khởi động Backend
 
 ```bash
-uv run uvicorn api.main:app --reload --port 8000
+uvicorn api.main:app --reload --port 8000
 ```
 
 - Swagger UI: <http://127.0.0.1:8000/docs>
-- `/health` chỉ xác nhận web process đang chạy.
-- `/ready` kiểm tra database, FAISS/metadata và cấu hình dependency mà không gọi OpenAI.
-- Chatbot/retriever được lazy-load khi request chat đầu tiên đến; startup không tải model.
+- Khi request đầu tiên đến, `lifespan` sẽ pre-warm `DentalChatbot` (load model ~420 MB + BM25 corpus) → các request sau chỉ còn latency LLM.
 
 ### 4.7. Khởi động Frontend
 
 ```bash
 cd frontend/nextjs-app
-npm install
-copy .env.example .env.local    # Windows
-# cp .env.example .env.local    # Linux/macOS
+npm install        # (hoặc pnpm install)
 npm run dev        # Next.js dev server tại http://localhost:3000
 ```
 
-Điền `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000/api` cho development. `.env.local`
-không được commit. Production build bắt buộc dùng URL HTTPS thật và từ chối fallback về
-`localhost`/`127.0.0.1`.
-
-### 4.8. Production trên aaPanel
-
-Production dùng Gunicorn, một worker ban đầu và bind nội bộ tại `127.0.0.1:8001`:
-
-```bash
-uv sync --frozen --no-dev
-uv run --frozen --no-dev alembic upgrade head
-uv run --frozen --no-dev gunicorn -c gunicorn_conf.py api.main:app
-```
-
-Trong production, `SECRET_KEY` phải có tối thiểu 32 ký tự và `CORS_ORIGINS` phải là
-danh sách domain frontend cụ thể, không dùng wildcard. Hướng dẫn đầy đủ gồm Nginx SSE,
-SSL, backup, rollback và smoke test nằm trong
-[`docs/DEPLOY_AAPANEL.md`](./docs/DEPLOY_AAPANEL.md).
+Frontend đã có sẵn `.env.local` trỏ tới `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000/api`.
+Nếu backend chạy ở host/port khác, sửa file `frontend/nextjs-app/.env.local` rồi restart `npm run dev`.
 
 ## 5. Thứ tự bật hệ thống 
 
@@ -252,12 +221,6 @@ Xem checklist đầy đủ và cách kiểm tra từng bước hoạt động đ
 | [README](./docs/README.md) | Chỉ mục, lộ trình đọc tài liệu |
 | [INSTALLATION_GUIDE](./docs/INSTALLATION_GUIDE.md) | Cài đặt từ A→Z: Python, MySQL, Ollama, pull model, lỗi thường gặp |
 | [RUN_GUIDE](./docs/RUN_GUIDE.md) | Thứ tự bật hệ thống, health-check từng tầng, smoke test |
-| [TESTING](./docs/TESTING.md) | Chạy pytest offline với SQLite, fake dependency và coverage |
-| [DEPENDENCY_MANAGEMENT](./docs/DEPENDENCY_MANAGEMENT.md) | Quản lý dependency bằng uv, lockfile và requirements export |
-| [DATABASE_MIGRATIONS](./docs/DATABASE_MIGRATIONS.md) | Alembic upgrade, downgrade, current và tạo revision mới |
-| [DEPLOY_AAPANEL](./docs/DEPLOY_AAPANEL.md) | Deploy production bằng Gunicorn, Nginx, health/readiness và rollback |
-| [PRODUCTION_READINESS_AUDIT](./docs/PRODUCTION_READINESS_AUDIT.md) | Issue Critical–Low, thay đổi đã sửa và residual risk |
-| [INCIDENT_RUNBOOK](./docs/INCIDENT_RUNBOOK.md) | Triage, phục hồi và rollback khi production gặp sự cố |
 | [TECHNICAL_FLOW](./docs/TECHNICAL_FLOW.md) | Luồng kỹ thuật end-to-end (Rewrite → Extract + Expand → Hybrid Search → Stream) |
 | [API_ARCHITECTURE](./docs/API_ARCHITECTURE.md) | FastAPI, Dependency Injection, SSE streaming, Pydantic schemas |
 | [FRONTEND_ARCHITECTURE](./docs/FRONTEND_ARCHITECTURE.md) | Next.js 16 / Zustand store / SSE client / 2FA flow UI |

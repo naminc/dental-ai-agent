@@ -8,13 +8,13 @@ from fastapi.concurrency import iterate_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from src.agent.chatbot import DentalChatbot
 from src.database.database import SessionLocal, get_db
 from src.database import models
 from src.auth.utils import get_current_user
 
 from src.chat.schemas import ChatRequest
 from src.chat.dependencies import get_chatbot
-from src.providers.errors import ProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def _save_message(
         db.commit()
     except Exception as e:
         db.rollback()
-        logger.error("Database failure while saving message: type=%s", type(e).__name__)
+        logger.exception("LỖI DATABASE khi lưu message: %s", e)
 
 
 def _save_message_in_new_session(
@@ -79,7 +79,7 @@ def _save_message_in_new_session(
 async def chat(
     request: ChatRequest,
     current_user=Depends(get_current_user),
-    chatbot=Depends(get_chatbot),
+    chatbot: DentalChatbot = Depends(get_chatbot),
 ):
     user_id = current_user.id
     session_id = request.session_id
@@ -87,8 +87,8 @@ async def chat(
     history = [m.model_dump() for m in request.chat_history]
 
     logger.info(
-        "[CHAT] user_id=%s | session=%s | question_length=%d",
-        user_id, session_id, len(user_question),
+        "[CHAT] user_id=%s | session=%s | question=%s",
+        user_id, session_id, user_question[:120],
     )
 
     # Lưu user message vào database
@@ -128,16 +128,8 @@ async def chat(
         except asyncio.CancelledError:
             logger.info("Client đã ngắt kết nối stream (session=%s)", session_id)
             raise
-        except ProviderError as error:
-            logger.warning(
-                "AI provider failure: provider=%s code=%s session=%s",
-                error.provider,
-                error.code,
-                session_id,
-            )
-            yield f"data: {json.dumps({'error': error.public_message}, ensure_ascii=False)}\n\n".encode("utf-8")
         except Exception as e:
-            logger.error("Chat stream failed: type=%s session=%s", type(e).__name__, session_id)
+            logger.exception("Lỗi stream: %s", e)
             yield f"data: {json.dumps({'error': 'Lỗi trong quá trình tạo câu trả lời'}, ensure_ascii=False)}\n\n".encode("utf-8")
 
     return StreamingResponse(
@@ -217,8 +209,7 @@ def delete_session(
         return {"message": "Đã xóa cuộc hội thoại thành công"}
     except Exception as e:
         db.rollback()
-        logger.error("Database failure while deleting session: type=%s", type(e).__name__)
-        raise HTTPException(status_code=500, detail="Lỗi khi xóa cuộc hội thoại")
+        raise HTTPException(status_code=500, detail=f"Lỗi khi xóa: {e}")
 
 
 # Xóa tất cả sessions
@@ -242,5 +233,5 @@ def clear_all_sessions(
         return {"message": "Đã xóa toàn bộ lịch sử thành công"}
     except Exception as e:
         db.rollback()
-        logger.error("Database failure while clearing sessions: type=%s", type(e).__name__)
-        raise HTTPException(status_code=500, detail="Lỗi khi dọn dẹp lịch sử")
+        logger.exception("LỖI DATABASE khi clear all sessions: %s", e)
+        raise HTTPException(status_code=500, detail=f"Lỗi khi dọn dẹp lịch sử: {e}")

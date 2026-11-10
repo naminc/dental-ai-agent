@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { ToothIcon } from "@/components/icons/tooth-icon";
 import { Sparkles } from "lucide-react";
-import { SUGGESTIONS, UI_MESSAGES } from "@/lib/constants";
+import { APP_CONFIG, SUGGESTIONS, UI_MESSAGES } from "@/lib/constants";
 
 // Props
 interface ChatWelcomeProps {

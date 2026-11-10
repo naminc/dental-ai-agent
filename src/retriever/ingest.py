@@ -34,10 +34,8 @@ import faiss
 import numpy as np
 from tqdm import tqdm
 
-from src.core.settings import get_settings
+from src.config import RAW_DATA_PATH, RAW_DATA_V2_PATH, PROCESSED_DATA_PATH, VECTOR_DB_DIR
 from src.retriever.engines import create_engine, EmbeddingEngine
-
-settings = get_settings()
 
 
 # Ingest
@@ -87,7 +85,7 @@ def build_faiss_index(engine_name: str) -> None:
     # Tạo engine
     engine: EmbeddingEngine = create_engine(engine_name)
     # Tạo output directory
-    output_dir: Path = settings.vector_db_dir / engine.name
+    output_dir: Path = VECTOR_DB_DIR / engine.name
 
     # In log
     print(f"{'=' * 60}")
@@ -96,11 +94,7 @@ def build_faiss_index(engine_name: str) -> None:
     print(f"{'=' * 60}")
 
     # Load dataset (ưu tiên v2 nếu tồn tại)
-    dataset_path = (
-        settings.raw_data_v2_path
-        if settings.raw_data_v2_path.exists()
-        else settings.raw_data_path
-    )
+    dataset_path = RAW_DATA_V2_PATH if RAW_DATA_V2_PATH.exists() else RAW_DATA_PATH
     print(f"\n[1/4] Tải tập dữ liệu: {dataset_path}")
     data = _load_dataset(dataset_path)
     print(f"      -> {len(data)} tài liệu đã được tải.")
@@ -142,8 +136,8 @@ def build_faiss_index(engine_name: str) -> None:
     _save_json(metadata, metadata_path)
     print(f"      -> Metadata đã xử lý: {metadata_path}")
 
-    _save_json(metadata, settings.processed_data_path)
-    print(f"      -> Chunks đã xử lý: {settings.processed_data_path}")
+    _save_json(metadata, PROCESSED_DATA_PATH)
+    print(f"      -> Chunks đã xử lý: {PROCESSED_DATA_PATH}")
 
     print(f"\n{'=' * 60}")
     print(f"  DONE! {len(metadata)} tài liệu đã được index với engine '{engine.name}'.")

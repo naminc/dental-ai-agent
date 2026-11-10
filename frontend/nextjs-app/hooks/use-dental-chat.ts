@@ -4,9 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { UI_MESSAGES } from "@/lib/constants";
-import { apiRequest } from "@/lib/api-client";
-import { openChatStream } from "@/lib/chat-stream-client";
+import { APP_CONFIG, UI_MESSAGES } from "@/lib/constants";
 import { validateToken, validateChatInput, confirmAction } from "@/lib/validators";
 import { readChatStream } from "@/lib/stream-reader";
 
@@ -42,6 +40,9 @@ export interface ChatSession {
   updatedAt: number;
 }
 
+// API Base URL
+const API_BASE_URL = `${APP_CONFIG.API_URL}`;
+
 // Dental Chat Hook
 export function useDentalChat() {
   const router = useRouter();
@@ -62,16 +63,6 @@ export function useDentalChat() {
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
   const currentMessages = activeSession?.messages || [];
 
-  useEffect(() => {
-    const handleUnauthorized = () => {
-      clearToken();
-      router.replace("/login");
-    };
-    window.addEventListener("auth:unauthorized", handleUnauthorized);
-    return () =>
-      window.removeEventListener("auth:unauthorized", handleUnauthorized);
-  }, [clearToken, router]);
-
   // Fetch sessions from database and check authentication
   useEffect(() => {
     const fetchSessions = async () => {
@@ -82,14 +73,17 @@ export function useDentalChat() {
       }
 
       try {
-        const data = await apiRequest<ChatSession[]>("/chat/sessions", {
-          token: currentToken,
-          onUnauthorized: () => {
-            clearToken();
-            router.push("/login");
-          },
+        const response = await fetch(`${API_BASE_URL}/chat/sessions`, {
+          headers: { Authorization: `Bearer ${currentToken}` },
         });
-        setSessions(data);
+        if (response.ok) {
+          const data = await response.json();
+          setSessions(data);
+        } else if (response.status === 401) {
+          clearToken();
+          router.push("/login");
+          return;
+        }
       } catch (error) {
         console.error("Lỗi tải lịch sử:", error);
       }
@@ -99,7 +93,7 @@ export function useDentalChat() {
       setIsCheckingAuth(false);
     };
     fetchSessions();
-  }, [router, initialize, clearToken, initTheme, fetchProfile]);
+  }, [router, initialize, clearToken, initTheme]);
 
   // Auto scroll when new message is added
   const lastMessageContent = currentMessages[currentMessages.length - 1]?.content ?? "";
@@ -110,39 +104,36 @@ export function useDentalChat() {
     });
   }, [currentMessages.length, lastMessageContent, isLoading]);
 
+  useEffect(() => {
+    setOpenSources({});
+  }, [activeSessionId]);
+
   // Create new session
   const handleNewChat = useCallback(() => {
     setActiveSessionId(null);
     setInput("");
-    setOpenSources({});
   }, []);
 
   // Select a session
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
       setActiveSessionId(sessionId);
-      setOpenSources({});
       const currentToken = validateToken(router, clearToken);
       if (!currentToken) return;
 
       const session = sessions.find((s) => s.id === sessionId);
       if (session && (!session.messages || session.messages.length === 0)) {
         try {
-          const messages = await apiRequest<Message[]>(
-            `/chat/sessions/${sessionId}/messages`,
-            {
-              token: currentToken,
-              onUnauthorized: () => {
-                clearToken();
-                router.push("/login");
-              },
-            },
+          const res = await fetch(
+            `${API_BASE_URL}/chat/sessions/${sessionId}/messages`,
+            { headers: { Authorization: `Bearer ${currentToken}` } },
           );
-          setSessions((prev) =>
-            prev.map((s) =>
-              s.id === sessionId ? { ...s, messages } : s,
-            ),
-          );
+          if (res.ok) {
+            const msgs = await res.json();
+            setSessions((prev) =>
+              prev.map((s) => (s.id === sessionId ? { ...s, messages: msgs } : s)),
+            );
+          }
         } catch (e) {
           console.error("Lỗi load tin nhắn chi tiết:", e);
         }
@@ -160,16 +151,17 @@ export function useDentalChat() {
       if (!confirmAction("Bạn có chắc chắn muốn xóa cuộc trò chuyện này?")) return;
 
       try {
-        await apiRequest<unknown>(`/chat/sessions/${id}`, {
+        const response = await fetch(`${API_BASE_URL}/chat/sessions/${id}`, {
           method: "DELETE",
-          token: currentToken,
-          onUnauthorized: () => {
-            clearToken();
-            router.push("/login");
-          },
+          headers: { Authorization: `Bearer ${currentToken}` },
         });
-        setSessions((prev) => prev.filter((s) => s.id !== id));
-        if (activeSessionId === id) setActiveSessionId(null);
+
+        if (response.ok) {
+          setSessions((prev) => prev.filter((s) => s.id !== id));
+          if (activeSessionId === id) setActiveSessionId(null);
+        } else {
+          alert("Không thể xóa cuộc trò chuyện. Vui lòng thử lại.");
+        }
       } catch (error) {
         console.error("Lỗi xóa session:", error);
       }
@@ -184,17 +176,16 @@ export function useDentalChat() {
     if (!confirmAction("Hành động này sẽ xóa vĩnh viễn toàn bộ lịch sử chat. Bạn có chắc không?")) return;
 
     try {
-      await apiRequest<unknown>("/chat/sessions", {
+      const response = await fetch(`${API_BASE_URL}/chat/sessions`, {
         method: "DELETE",
-        token: currentToken,
-        onUnauthorized: () => {
-          clearToken();
-          router.push("/login");
-        },
+        headers: { Authorization: `Bearer ${currentToken}` },
       });
-      setSessions([]);
-      setActiveSessionId(null);
-      setOpenSources({});
+
+      if (response.ok) {
+        setSessions([]);
+        setActiveSessionId(null);
+        setOpenSources({});
+      }
     } catch (e) {
       console.error("Lỗi xóa tất cả sessions:", e);
     }
@@ -239,7 +230,6 @@ export function useDentalChat() {
         };
         setSessions((prev) => [newSession, ...prev]);
         setActiveSessionId(sessionId);
-        setOpenSources({});
       } else {
         setSessions((prev) =>
           prev.map((s) =>
@@ -255,20 +245,18 @@ export function useDentalChat() {
       setIsLoading(true);
 
       try {
-        const response = await openChatStream(
-          {
+        const response = await fetch(`${API_BASE_URL}/chat`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${currentToken}`,
+          },
+          body: JSON.stringify({
             session_id: sessionId,
             user_question: userMessage.content,
             chat_history: currentHistory.map((m) => ({ role: m.role, content: m.content })),
-          },
-          currentToken,
-          {
-            onUnauthorized: () => {
-              clearToken();
-              router.push("/login");
-            },
-          },
-        );
+          }),
+        });
 
         if (!response.ok) {
           if (response.status === 401) {

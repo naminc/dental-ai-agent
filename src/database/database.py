@@ -1,16 +1,19 @@
 import logging
 
-from sqlalchemy import create_engine, event
-from sqlalchemy.exc import DisconnectionError
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import OperationalError, DisconnectionError
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
-from src.core.settings import get_settings
+from src.config import DATABASE_URL
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
+
+# Kiểm tra DATABASE_URL
+if not DATABASE_URL:
+    raise ValueError("Thiếu DATABASE_URL trong file .env")
 
 # Tạo engine với cấu hình connection pool
 engine = create_engine(
-    settings.database_url,
+    DATABASE_URL,
     pool_pre_ping=True,        # Kiểm tra connection có sống không
     pool_recycle=280,          # Tái tạo connection sau 280s
     pool_size=5,               # Số connection tối đa trong pool

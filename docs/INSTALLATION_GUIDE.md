@@ -20,7 +20,7 @@ Tài liệu này hướng dẫn cài đặt hệ thống Dental AI Assistant t�
 
 ## 2. Cài đặt công cụ nền tảng
 
-### 2.1. Python 3.11
+### 2.1. Python 3.10+
 
 - **Windows:** tải từ <https://python.org/downloads>, **nhớ tick “Add Python to PATH”**.
 - **macOS:** `brew install python@3.11`.
@@ -80,18 +80,30 @@ mysql -u root -p -e "SELECT VERSION();"
 git clone https://github.com/naminc/DA14_AI_Dental_Agent.git
 cd DA14_AI_Dental_Agent
 
-# Cài uv và đồng bộ đúng lockfile
-python -m pip install uv
-uv sync --frozen
+# Tạo môi trường ảo
+python -m venv .venv
 
-# Nếu dùng EMBEDDING_ENGINE=local
-uv sync --frozen --extra local-embedding
+# Kích hoạt
+# Windows PowerShell:
+.venv\Scripts\Activate.ps1
+# Windows CMD:
+.venv\Scripts\activate.bat
+# macOS/Linux:
+source .venv/bin/activate
+
+# Cài thư viện
+pip install --upgrade pip
+pip install -r requirements.txt
 ```
+
+> **Lỗi hay gặp trên Windows:** `Activate.ps1` bị chặn bởi Execution Policy. Fix:
+> ```powershell
+> Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+> ```
 
 **Kiểm chứng:**
 ```bash
-uv run python -c "import fastapi, faiss, openai, underthesea; print('runtime OK')"
-uv run --extra local-embedding python -c "import sentence_transformers; print('local embedding OK')"
+python -c "import fastapi, faiss, openai, sentence_transformers, underthesea; print('OK')"
 ```
 
 ---
@@ -173,14 +185,7 @@ Rồi đổi `DATABASE_URL=mysql+pymysql://dental_app:your-strong-password@local
 python -c "from sqlalchemy import create_engine; import os; from dotenv import load_dotenv; load_dotenv(); create_engine(os.getenv('DATABASE_URL')).connect(); print('DB OK')"
 ```
 
-Tạo hoặc cập nhật các bảng bằng Alembic trước khi start backend:
-
-```bash
-alembic upgrade head
-alembic current
-```
-
-Backend không tự tạo bảng hoặc tự chạy migration khi startup.
+> Các bảng `users`, `chat_sessions`, `messages` sẽ được **tự tạo** khi backend start lần đầu (`models.Base.metadata.create_all` trong `api/main.py`). Không cần chạy migration thủ công.
 
 ---
 
@@ -364,14 +369,14 @@ python -m src.retriever.ingest --engine local
 | Frontend báo `Network Error` / `CORS` | Backend chưa chạy hoặc cổng sai | Đảm bảo backend ở `http://127.0.0.1:8000` + `NEXT_PUBLIC_API_URL` khớp |
 | `Access denied for user 'root'@'localhost'` | Sai password MySQL | Sửa `DATABASE_URL` đúng username/password |
 | `(2006, "MySQL server has gone away")` | MySQL timeout idle connection | Đã fix: engine cấu hình `pool_pre_ping=True` + `pool_recycle=1800` tự reconnect |
-| `ImportError: Could not find the DLL(s) 'libfaiss_avx2.dll'` | Python/FAISS không tương thích | Chạy lại `uv sync --reinstall-package faiss-cpu`, dùng Python 3.11 |
+| `ImportError: Could not find the DLL(s) 'libfaiss_avx2.dll'` | Python/FAISS không tương thích | Cài lại `pip install faiss-cpu --no-cache-dir`, dùng Python 3.10/3.11 |
 | `from underthesea import word_tokenize` chạy chậm lần đầu | Underthesea lazy-load model | Bình thường — chỉ chậm lần đầu ingest, các lần sau đã cache |
 
 ---
 
 ## 13. Tổng kết checklist cài đặt
 
-- [ ] Python 3.11 + `uv sync --frozen` hoàn tất
+- [ ] Python 3.10+ + `.venv` activated + `pip install -r requirements.txt`
 - [ ] Node 18+ + `npm install` trong `frontend/nextjs-app`
 - [ ] MySQL đang chạy + database `dental_agent_db` đã được tạo
 - [ ] `.env` có đủ: `DATABASE_URL`, `SECRET_KEY`, `TOP_K`, engine keys

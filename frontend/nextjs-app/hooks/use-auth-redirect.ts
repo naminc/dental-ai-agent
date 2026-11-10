@@ -16,8 +16,7 @@ export function useAuthRedirect() {
     if (token) {
       router.replace("/");
     } else {
-      const timeoutId = window.setTimeout(() => setIsCheckingAuth(false), 0);
-      return () => window.clearTimeout(timeoutId);
+      setIsCheckingAuth(false);
     }
   }, [router, initialize]);
 

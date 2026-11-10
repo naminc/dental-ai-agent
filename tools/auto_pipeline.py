@@ -15,19 +15,28 @@ Chạy:
 
 import os
 import json
+import sys
 import argparse
 import glob
 import time
 import re
 import unicodedata
 
+import dotenv
 import requests
 from bs4 import BeautifulSoup
-from src.core.settings import get_settings
-from src.providers.factory import get_chat_provider
+from openai import OpenAI
 
-settings = get_settings()
-provider = get_chat_provider("openai", settings.auto_pipeline_model)
+dotenv.load_dotenv()
+
+
+AUTO_PIPELINE_MODEL = os.getenv("AUTO_PIPELINE_MODEL", "gpt-4.1-mini")
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    print("ERROR: OPENAI_API_KEY chưa được set trong .env")
+    sys.exit(1)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # ────────────────────────────────────────────
 # Shared: GPT chunking
@@ -83,7 +92,8 @@ Bài viết gốc:
 """
 
     try:
-        raw = provider.complete(
+        response = client.chat.completions.create(
+            model=AUTO_PIPELINE_MODEL,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": "Trả về duy nhất 1 JSON object chứa key 'data' là mảng các mẩu tin y khoa. Đã lọc bỏ quảng cáo."},
@@ -91,7 +101,7 @@ Bài viết gốc:
             ],
             temperature=0.1,
         )
-        result_json = json.loads(raw)
+        result_json = json.loads(response.choices[0].message.content)
         chunks = result_json.get("data", [])
 
         # Tự sinh id + gắn source/source_name, đảm bảo thứ tự key chuẩn

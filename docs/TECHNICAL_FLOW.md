@@ -137,8 +137,7 @@ Danh mục và queries mở rộng được truyền trực tiếp vào `Retriev
 
 ## Bước 3: Truy xuất hỗn hợp (Hybrid Retrieval)
 
-**Files:** `src/retriever/retrieval_service.py` → `RetrievalService.search()`,
-với facade tương thích `src/retriever/search.py` → `Retriever.search()`.
+**File:** `src/retriever/search.py` → `Retriever.search()`
 
 Đây là bước cốt lõi của hệ thống RAG. `search()` nhận `expanded_queries` và `categories` từ bên ngoài (đã tính ở Bước 2), gồm 3 giai đoạn con:
 
@@ -222,7 +221,7 @@ doc_B:  query_1=0.008 + query_2=0.000 + query_3=0.000 = 0.008  ← thấp hơn
 
 ## Bước 4: Lọc và xếp hạng ngữ cảnh (Context Filtering & Ranking)
 
-**File:** `src/retriever/rrf_ranker.py` → `RRFRanker.boost_overview()`
+**File:** `src/retriever/search.py` → `_boost_overview()`
 **File:** `src/agent/chatbot.py` → `build_context()`
 
 ### 4a. Overview Boost

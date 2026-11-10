@@ -9,13 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
-from src.core.settings import get_settings
+from src.config import SECRET_KEY, ALGORITHM
 from src.database.database import get_db
 from src.database.models import User
 from src.auth import schemas, utils
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
-settings = get_settings()
 
 
 # Helper Functions
@@ -39,8 +38,8 @@ def _format_secret(secret: str) -> str:
 def _build_token_response(user: User) -> dict:
     """Xây dựng response token."""
     access_token = utils.create_access_token(
-        data={"sub": user.email, "user_id": user.id, "purpose": "access"},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
+        data={"sub": user.email, "user_id": user.id},
+        expires_delta=timedelta(minutes=utils.ACCESS_TOKEN_EXPIRE_MINUTES),
     )
     return {
         "access_token": access_token,
@@ -207,11 +206,7 @@ def disable_2fa(
 def verify_2fa_login(data: schemas.TwoFactorLoginRequest, db: Session = Depends(get_db)):
     """Bước 2 của login khi 2FA đang bật: xác thực mã TOTP + trả token thật."""
     try:
-        payload = jwt.decode(
-            data.temp_token,
-            settings.secret_key_value,
-            algorithms=[settings.algorithm],
-        )
+        payload = jwt.decode(data.temp_token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("purpose") != "2fa_verify":
             raise HTTPException(status_code=401, detail="Token không hợp lệ")
         email: str = payload.get("sub")

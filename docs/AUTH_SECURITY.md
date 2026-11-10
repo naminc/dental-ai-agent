@@ -194,7 +194,7 @@ Messages
 └── created_at       DATETIME, DEFAULT utcnow()
 ```
 
-> Định nghĩa ORM tại `src/database/models.py`; schema database được tạo và cập nhật bằng các Alembic revision trong `migrations/versions/`.
+> Định nghĩa chính xác tại `src/database/models.py` — SQLAlchemy tự sinh DDL qua `Base.metadata.create_all(bind=engine)` trong `api/main.py`.
 
 Quan hệ: `User 1:N ChatSession 1:N Message`
 Cascade: Xóa user → xóa tất cả session → xóa tất cả message.

@@ -36,19 +36,13 @@ Thư mục này tập hợp toàn bộ tài liệu kỹ thuật của đồ án 
 |---|---|---|
 | [INSTALLATION_GUIDE](./INSTALLATION_GUIDE.md) | Cài Python/Node/MySQL/Ollama, pull model, build FAISS index, troubleshoot | Developer lần đầu setup |
 | [RUN_GUIDE](./RUN_GUIDE.md) | Thứ tự bật/tắt, health-check, smoke test, switch engine | Daily dev, demo |
-| [DEPLOY_AAPANEL](./DEPLOY_AAPANEL.md) | Deploy Gunicorn/FastAPI, Nginx, health/readiness và rollback | Production aaPanel |
-| [DATABASE_MIGRATIONS](./DATABASE_MIGRATIONS.md) | Alembic upgrade, autogenerate, current, downgrade và stamp | Thay đổi database schema |
-| [DEPENDENCY_MANAGEMENT](./DEPENDENCY_MANAGEMENT.md) | uv sync, lockfile, dependency groups và requirements export | Quản lý Python environment |
-| [TESTING](./TESTING.md) | Pytest offline, SQLite tạm, fake dependency và coverage | Kiểm thử backend |
-| [INCIDENT_RUNBOOK](./INCIDENT_RUNBOOK.md) | Triage, khôi phục, rollback và thu thập bằng chứng sự cố | Production on-call |
-| [PRODUCTION_READINESS_AUDIT](./PRODUCTION_READINESS_AUDIT.md) | Issue Critical–Low, thay đổi và residual risk | Release review |
 
 ### 2b. Tài liệu Kiến trúc
 
 | File | Nội dung |
 |---|---|
 | [TECHNICAL_FLOW](./TECHNICAL_FLOW.md) | 5 bước pipeline: Rewrite → Extract + Expand (song song) → Hybrid Search → Context → Stream |
-| [API_ARCHITECTURE](./API_ARCHITECTURE.md) | FastAPI entry, Dependency Injection, SSE streaming, health/readiness và lazy loading |
+| [API_ARCHITECTURE](./API_ARCHITECTURE.md) | FastAPI entry, Dependency Injection, SSE streaming, Pydantic schemas, lifespan warmup |
 | [FRONTEND_ARCHITECTURE](./FRONTEND_ARCHITECTURE.md) | Next.js 16 App Router, Zustand stores, SSE parser, 2FA UX flow |
 | [AUTH_SECURITY](./AUTH_SECURITY.md) | JWT + bcrypt + TOTP 2FA, database schema chính xác theo code |
 | [DATA_SCHEMA](./DATA_SCHEMA.md) | Dataset v1 (plain text) vs v2 (markdown + summary), pipeline nâng cấp |
