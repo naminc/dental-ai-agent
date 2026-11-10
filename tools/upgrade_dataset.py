@@ -10,16 +10,14 @@ Sử dụng: python upgrade_dataset.py
 """
 
 import json
-import os
 import sys
 import time
 from pathlib import Path
 
-from dotenv import load_dotenv
-from openai import OpenAI, APIError, APITimeoutError, RateLimitError
 from tqdm import tqdm
-
-load_dotenv()
+from src.core.settings import get_settings
+from src.providers.errors import ProviderError
+from src.providers.factory import get_chat_provider
 
 # Cấu hình
 # Input path
@@ -28,14 +26,8 @@ OUTPUT_PATH = Path("data/main/crawl_dental_dataset_v2.json")
 # Checkpoint interval
 CHECKPOINT_INTERVAL = 50
 
-# OpenAI client
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    print("ERROR: OPENAI_API_KEY chưa được set trong .env")
-    sys.exit(1)
-client = OpenAI(api_key=OPENAI_API_KEY)
-# Model
-MODEL = os.getenv("UPGRADE_DATASET_MODEL", "gpt-4o-mini")
+settings = get_settings()
+provider = get_chat_provider("openai", settings.upgrade_dataset_model)
 # System prompt
 
 SYSTEM_PROMPT = """\
@@ -69,8 +61,7 @@ def call_openai(title: str, section: str, content: str, max_retries: int = 5) ->
     for attempt in range(1, max_retries + 1):
         try:
             # Gọi OpenAI API
-            resp = client.chat.completions.create(
-                model=MODEL,
+            raw = provider.complete(
                 temperature=0.2,
                 response_format={"type": "json_object"},
                 messages=[
@@ -78,8 +69,6 @@ def call_openai(title: str, section: str, content: str, max_retries: int = 5) ->
                     {"role": "user", "content": user_msg},
                 ],
             )
-            # Lấy kết quả
-            raw = resp.choices[0].message.content
             result = json.loads(raw)
 
             # Kiểm tra kết quả
@@ -89,10 +78,10 @@ def call_openai(title: str, section: str, content: str, max_retries: int = 5) ->
             # Trả về kết quả
             return result
 
-        except (APITimeoutError, APIError, RateLimitError) as e:
+        except ProviderError as e:
             # Wait and retry
             wait = min(2 ** attempt, 60)
-            print(f"\n  [Retry {attempt}/{max_retries}] {type(e).__name__}: {e}")
+            print(f"\n  [Retry {attempt}/{max_retries}] {e.code}")
             print(f"  Đợi {wait}s rồi thử lại...")
             time.sleep(wait)
 

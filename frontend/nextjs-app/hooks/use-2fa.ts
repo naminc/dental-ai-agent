@@ -2,14 +2,20 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useAuthStore } from "@/stores/use-auth-store";
-import { APP_CONFIG } from "@/lib/constants";
-
-const API_URL = APP_CONFIG.API_URL;
+import { ApiError, apiRequest } from "@/lib/api-client";
 
 // Setup Data Type
 interface SetupData {
   secret: string;
   qr_code: string;
+}
+
+interface TwoFactorStatus {
+  is_enabled: boolean;
+}
+
+function requestError(error: unknown, fallback: string): string {
+  return error instanceof ApiError ? error.message : fallback;
 }
 
 // 2FA Hook
@@ -28,33 +34,21 @@ export function use2FA() {
   const [disableCode, setDisableCode] = useState("");
   const [error, setError] = useState("");
 
-  // Headers
-  const headers = useCallback(
-    () => ({
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    }),
-    [token],
-  );
-
   // Fetch 2FA Status When Mount
   useEffect(() => {
     if (!token) {
-      setIsLoading(false);
-      return;
+      const timeoutId = window.setTimeout(() => setIsLoading(false), 0);
+      return () => window.clearTimeout(timeoutId);
     }
 
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/auth/2fa/status`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const data = await apiRequest<TwoFactorStatus>("/auth/2fa/status", {
+          token,
         });
-        if (res.ok) {
-          const data = await res.json();
-          setIsEnabled(data.is_enabled);
-        }
-      } catch {
-        setError("Không thể kết nối server");
+        setIsEnabled(data.is_enabled);
+      } catch (error) {
+        setError(requestError(error, "Không thể kết nối server"));
       } finally {
         setIsLoading(false);
       }
@@ -70,21 +64,14 @@ export function use2FA() {
         // Setup
         setIsLoading(true);
         try {
-          const res = await fetch(`${API_URL}/auth/2fa/setup`, {
+          const data = await apiRequest<SetupData>("/auth/2fa/setup", {
             method: "POST",
-            headers: headers(),
+            token,
           });
-
-          if (res.ok) {
-            const data: SetupData = await res.json();
-            setSetupData(data);
-            setShowSetup(true);
-          } else {
-            const err = await res.json();
-            setError(err.detail || "Không thể thiết lập 2FA");
-          }
-        } catch {
-          setError("Không thể kết nối server");
+          setSetupData(data);
+          setShowSetup(true);
+        } catch (error) {
+          setError(requestError(error, "Không thể thiết lập 2FA"));
         } finally {
           setIsLoading(false);
         }
@@ -92,7 +79,7 @@ export function use2FA() {
         setShowDisable(true);
       }
     },
-    [isEnabled, headers],
+    [isEnabled, token],
   );
 
   // Verify
@@ -101,27 +88,21 @@ export function use2FA() {
     setError("");
 
     try {
-      const res = await fetch(`${API_URL}/auth/2fa/verify`, {
+      await apiRequest<unknown>("/auth/2fa/verify", {
         method: "POST",
-        headers: headers(),
-        body: JSON.stringify({ totp_code: verificationCode }),
+        token,
+        body: { totp_code: verificationCode },
       });
-
-      if (res.ok) {
-        setIsEnabled(true);
-        setShowSetup(false);
-        setSetupData(null);
-        setVerificationCode("");
-      } else {
-        const err = await res.json();
-        setError(err.detail || "Mã xác thực không đúng");
-      }
-    } catch {
-      setError("Không thể kết nối server");
+      setIsEnabled(true);
+      setShowSetup(false);
+      setSetupData(null);
+      setVerificationCode("");
+    } catch (error) {
+      setError(requestError(error, "Mã xác thực không đúng"));
     } finally {
       setIsVerifying(false);
     }
-  }, [verificationCode, headers]);
+  }, [verificationCode, token]);
 
   // Disable
   const handleDisable = useCallback(async () => {
@@ -129,26 +110,20 @@ export function use2FA() {
     setError("");
 
     try {
-      const res = await fetch(`${API_URL}/auth/2fa/disable`, {
+      await apiRequest<unknown>("/auth/2fa/disable", {
         method: "POST",
-        headers: headers(),
-        body: JSON.stringify({ totp_code: disableCode }),
+        token,
+        body: { totp_code: disableCode },
       });
-
-      if (res.ok) {
-        setIsEnabled(false);
-        setShowDisable(false);
-        setDisableCode("");
-      } else {
-        const err = await res.json();
-        setError(err.detail || "Mã xác thực không đúng");
-      }
-    } catch {
-      setError("Không thể kết nối server");
+      setIsEnabled(false);
+      setShowDisable(false);
+      setDisableCode("");
+    } catch (error) {
+      setError(requestError(error, "Mã xác thực không đúng"));
     } finally {
       setIsVerifying(false);
     }
-  }, [disableCode, headers]);
+  }, [disableCode, token]);
 
   // Cancel Setup
   const handleCancelSetup = useCallback(() => {

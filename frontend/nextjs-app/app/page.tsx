@@ -9,7 +9,6 @@ import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatWelcome } from "@/components/chat/chat-welcome";
 import { ChatMessage } from "@/components/chat/chat-message";
 import { ChatInput } from "@/components/chat/chat-input";
-import { ChatLoading } from "@/components/chat/chat-loading";
 import { AboutDialog } from "@/components/chat/about-dialog";
 import { AccountDialog } from "@/components/chat/account-dialog";
 
@@ -87,7 +86,6 @@ export default function ChatPage() {
                     <ChatMessage
                       key={index}
                       message={msg}
-                      index={index}
                       isSourceOpen={openSources[index] || false}
                       onSourceToggle={(open) =>
                         setOpenSources((prev) => ({ ...prev, [index]: open }))

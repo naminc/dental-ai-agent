@@ -12,7 +12,6 @@ export const SUGGESTIONS = [
 export const APP_CONFIG = {
   NAME: "Dental AI Assistant",
   VERSION: "1.0.0",
-  API_URL: process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000",
   DEVELOPER: "Ngo Dinh Nam",
   WEBSITE: "https://naminc.dev/",
   EMAIL: "admin@naminc.dev",

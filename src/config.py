@@ -1,65 +1,41 @@
-from pathlib import Path
-import os
-from dotenv import load_dotenv
+"""Backward-compatible exports for scripts that still import ``src.config``.
 
-load_dotenv()
+New application code should use ``get_settings()`` from ``src.core.settings``.
+"""
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+from src.core.settings import BASE_DIR, get_settings
 
-# Data paths (shared across engines)
-RAW_DATA_PATH = BASE_DIR / "data" / "raw" / "dental_dataset.json"
-RAW_DATA_V2_PATH = BASE_DIR / "data" / "raw" / "dental_dataset_v2.json"
-PROCESSED_DATA_PATH = BASE_DIR / "data" / "processed" / "chunks.json"
 
-# Multi-Embedding Engine
-#   EMBEDDING_ENGINE = "local"   → sentence-transformers (miễn phí, offline)
-#   EMBEDDING_ENGINE = "openai"  → API text-embedding-3-small (trả phí)
-EMBEDDING_ENGINE = os.getenv("EMBEDDING_ENGINE", "local")
+_settings = get_settings()
 
-VECTOR_DB_DIR = BASE_DIR / "data" / "vector_db"
+RAW_DATA_PATH = _settings.raw_data_path
+RAW_DATA_V2_PATH = _settings.raw_data_v2_path
+PROCESSED_DATA_PATH = _settings.processed_data_path
+VECTOR_DB_DIR = _settings.vector_db_dir
 
-# OpenAI config (embedding + chat)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
-OPENAI_EMBEDDING_DIM = 1536
+EMBEDDING_ENGINE = _settings.embedding_engine.value
+LLM_ENGINE = _settings.llm_engine.value
 
-# Local embedding config (sentence-transformers)
-LOCAL_EMBEDDING_MODEL = "keepitreal/vietnamese-sbert"
-LOCAL_EMBEDDING_DIM = 768
+OPENAI_API_KEY = _settings.openai_api_key_value
+OPENAI_CHAT_MODEL = _settings.openai_chat_model
+OPENAI_EMBEDDING_MODEL = _settings.openai_embedding_model
+OPENAI_EMBEDDING_DIM = _settings.openai_embedding_dim
 
-# Auth
-DATABASE_URL = os.getenv("DATABASE_URL")
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60 * 24 * 7))
+OLLAMA_BASE_URL = _settings.ollama_base_url
+OLLAMA_CHAT_MODEL = _settings.ollama_chat_model
 
-# Multi-LLM Engine
-#   LLM_ENGINE = "openai"  → API OpenAI (gpt-4.1-mini, trả phí)
-#   LLM_ENGINE = "local"   → Ollama localhost (qwen2.5:1.5b, miễn phí)
-LLM_ENGINE = os.getenv("LLM_ENGINE", "openai")
+LOCAL_EMBEDDING_MODEL = _settings.local_embedding_model
+LOCAL_EMBEDDING_DIM = _settings.local_embedding_dim
 
-# OpenAI chat model
-OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini")
+DATABASE_URL = _settings.database_url
+SECRET_KEY = _settings.secret_key_value
+ALGORITHM = _settings.algorithm
+ACCESS_TOKEN_EXPIRE_MINUTES = _settings.access_token_expire_minutes
 
-# Ollama base URL
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-# Ollama chat model
-OLLAMA_CHAT_MODEL = os.getenv("OLLAMA_CHAT_MODEL", "qwen2.5:1.5b")
+MULTI_QUERY_EXPANSION = _settings.multi_query_expansion
+TOP_K = _settings.top_k
 
-# Multi-Query Expansion (tắt để tăng tốc local engine)
-#   MULTI_QUERY_EXPANSION = "true"   → bật (mặc định cho cloud)
-#   MULTI_QUERY_EXPANSION = "false"  → tắt (khuyên dùng cho local engine yếu)
-MULTI_QUERY_EXPANSION = os.getenv("MULTI_QUERY_EXPANSION", "true").lower() in ("true", "1", "yes")
+UPGRADE_DATASET_MODEL = _settings.upgrade_dataset_model
+AUTO_PIPELINE_MODEL = _settings.auto_pipeline_model
 
-# Top K — số tài liệu cuối cùng đưa vào context cho LLM
-TOP_K = int(os.getenv("TOP_K", 10))
-
-# Upgrade dataset model
-UPGRADE_DATASET_MODEL = os.getenv("UPGRADE_DATASET_MODEL", "gpt-4o-mini")
-
-# Auto pipeline model
-AUTO_PIPELINE_MODEL = os.getenv("AUTO_PIPELINE_MODEL", "gpt-4.1-mini")
-
-# Log file path
-# Trên VPS có thể set LOG_FILE=/www/wwwlogs/python/dental-api/chat.log trong .env
-LOG_FILE = os.getenv("LOG_FILE", str(BASE_DIR / "logs" / "chat.log"))
+LOG_FILE = _settings.log_file

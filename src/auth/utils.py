@@ -7,14 +7,11 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from src.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from src.core.settings import get_settings
 from src.database.database import get_db
 from src.database.models import User
 
-# Kiểm tra SECRET_KEY
-# Cấu hình Token
-if not SECRET_KEY:
-    raise RuntimeError("SECRET_KEY chưa được cấu hình trong file .env")
+settings = get_settings()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer()
@@ -30,9 +27,16 @@ def verify_password(plain_password: str, hashed_password: str):
 # Tạo token (JWT)
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(timezone.utc) + (
+        expires_delta
+        or timedelta(minutes=settings.access_token_expire_minutes)
+    )
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(
+        to_encode,
+        settings.secret_key_value,
+        algorithm=settings.algorithm,
+    )
     return encoded_jwt
 
 # Lấy user hiện tại từ token
@@ -44,9 +48,16 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
+        payload = jwt.decode(
+            token,
+            settings.secret_key_value,
+            algorithms=[settings.algorithm],
+        )
+        email = payload.get("sub")
+        purpose = payload.get("purpose")
+        # Legacy access tokens without a purpose remain valid. A short-lived
+        # 2FA challenge token must never authorize protected API access.
+        if not isinstance(email, str) or not email or purpose not in {None, "access"}:
             raise credentials_exception
     except JWTError:
         raise credentials_exception

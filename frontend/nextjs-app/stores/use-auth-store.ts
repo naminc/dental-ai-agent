@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { APP_CONFIG } from "@/lib/constants";
+import { ApiError, apiRequest } from "@/lib/api-client";
 
 // Type Definitions
 export interface UserInfo {
@@ -21,6 +21,19 @@ interface LoginResult {
 interface ActionResult {
   success: boolean;
   error?: string;
+}
+
+interface AuthResponse {
+  access_token?: string;
+  requires_2fa?: boolean;
+  temp_token?: string;
+  full_name?: string;
+  email?: string;
+}
+
+interface ProfileResponse {
+  full_name: string;
+  email: string;
 }
 
 // Trạng thái xác thực
@@ -53,7 +66,9 @@ interface AuthState {
   updateProfile: (data: { fullName: string }) => Promise<ActionResult>;
 }
 
-const API_BASE_URL = APP_CONFIG.API_URL;
+function requestError(error: unknown, fallback: string): string {
+  return error instanceof ApiError ? error.message : fallback;
+}
 
 // Store Zustand
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -94,18 +109,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const token = get().token || localStorage.getItem("access_token");
     if (!token) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const data = await apiRequest<ProfileResponse>("/auth/me", {
+        token,
+        onUnauthorized: get().clearToken,
       });
-      if (response.ok) {
-        const data = await response.json();
-        const user: UserInfo = {
-          fullName: data.full_name,
-          email: data.email,
-        };
-        localStorage.setItem("user_info", JSON.stringify(user));
-        set({ user });
-      }
+      const user: UserInfo = {
+        fullName: data.full_name,
+        email: data.email,
+      };
+      localStorage.setItem("user_info", JSON.stringify(user));
+      set({ user });
     } catch {
       console.error("Không thể lấy thông tin user");
     }
@@ -114,17 +127,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // Đăng nhập
   login: async (email, password) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+      const data = await apiRequest<AuthResponse>("/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        token: null,
+        body: { email, password },
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        return { success: false, error: data.detail || "Đăng nhập thất bại" };
-      }
 
       // 2FA required → trả về temp_token cho bước xác thực tiếp theo
       if (data.requires_2fa) {
@@ -135,6 +142,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         };
       }
 
+      if (!data.access_token || !data.full_name || !data.email) {
+        return { success: false, error: "Phản hồi đăng nhập không hợp lệ" };
+      }
       // Đăng nhập bình thường (không cần xác thực 2FA)
       const user: UserInfo = {
         fullName: data.full_name,
@@ -145,10 +155,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ token: data.access_token, user, isAuthenticated: true });
 
       return { success: true };
-    } catch {
+    } catch (error) {
       return {
         success: false,
-        error: "Không thể kết nối đến máy chủ Backend.",
+        error: requestError(error, "Không thể kết nối đến máy chủ Backend."),
       };
     }
   },
@@ -156,16 +166,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // Xác thực 2FA bước 2
   verify2FALogin: async (tempToken, totpCode) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/2fa/login-verify`, {
+      const data = await apiRequest<AuthResponse>("/auth/2fa/login-verify", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ temp_token: tempToken, totp_code: totpCode }),
+        token: null,
+        body: { temp_token: tempToken, totp_code: totpCode },
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        return { success: false, error: data.detail || "Xác thực thất bại" };
+      if (!data.access_token || !data.full_name || !data.email) {
+        return { success: false, error: "Phản hồi xác thực không hợp lệ" };
       }
 
       const user: UserInfo = {
@@ -177,10 +184,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ token: data.access_token, user, isAuthenticated: true });
 
       return { success: true };
-    } catch {
+    } catch (error) {
       return {
         success: false,
-        error: "Không thể kết nối đến máy chủ Backend.",
+        error: requestError(error, "Không thể kết nối đến máy chủ Backend."),
       };
     }
   },
@@ -191,20 +198,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!token) return { success: false, error: "Chưa đăng nhập" };
 
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/update-profile`, {
+      await apiRequest<unknown>("/auth/update-profile", {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ full_name: fullName }),
+        token,
+        body: { full_name: fullName },
+        onUnauthorized: get().clearToken,
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        return { success: false, error: data.detail || "Cập nhật thất bại" };
-      }
 
       const currentUser = get().user;
       if (currentUser) {
@@ -214,10 +213,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       return { success: true };
-    } catch {
+    } catch (error) {
       return {
         success: false,
-        error: "Không thể kết nối đến máy chủ Backend.",
+        error: requestError(error, "Không thể kết nối đến máy chủ Backend."),
       };
     }
   },
@@ -232,33 +231,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!token) return { success: false, error: "Chưa đăng nhập" };
 
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/change-password`, {
+      await apiRequest<unknown>("/auth/change-password", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+        token,
+        body: {
           current_password: currentPassword,
           new_password: newPassword,
           confirm_new_password: confirmNewPassword,
-        }),
+        },
+        onUnauthorized: get().clearToken,
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        return {
-          success: false,
-          error: data.detail || "Đổi mật khẩu thất bại",
-        };
-      }
-
       return { success: true };
-    } catch {
+    } catch (error) {
       return {
         success: false,
-        error: "Không thể kết nối đến máy chủ Backend.",
+        error: requestError(error, "Không thể kết nối đến máy chủ Backend."),
       };
     }
   },
@@ -266,28 +254,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // Đăng ký
   register: async ({ fullName, email, password, confirmPassword }) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/register`, {
+      await apiRequest<unknown>("/auth/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        token: null,
+        body: {
           full_name: fullName,
           email,
           password,
           confirm_password: confirmPassword,
-        }),
+        },
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        return { success: false, error: data.detail || "Đăng ký thất bại" };
-      }
-
       return { success: true };
-    } catch {
+    } catch (error) {
       return {
         success: false,
-        error: "Không thể kết nối đến máy chủ Backend.",
+        error: requestError(error, "Không thể kết nối đến máy chủ Backend."),
       };
     }
   },

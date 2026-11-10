@@ -7,6 +7,9 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+.coverage
+htmlcov/
+.pytest_cache/
 
 # FAISS embeddings
 data/embeddings/
@@ -31,6 +34,8 @@ Thumbs.db
 notebooks/.ipynb_checkpoints/
 
 *.zip
+*.tsbuildinfo
+*.tsbuildinfo
 node_modules/
 .next/
 out/

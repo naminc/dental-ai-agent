@@ -1,88 +1,53 @@
-# project directory
-chdir = '/www/wwwroot/dental-api'
+"""Gunicorn configuration for the aaPanel production process.
 
-# worker processes
-workers = 2
+This file must stay side-effect free: it only reads process environment values
+and never imports the FastAPI application or contacts external services.
+"""
 
-# threads per worker
-threads = 2
+import os
 
-# user to run as
-user = 'www'
 
-# worker type
-worker_class = 'uvicorn.workers.UvicornWorker'
+def _positive_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer, got {raw_value!r}") from exc
+    if value < 1:
+        raise RuntimeError(f"{name} must be greater than zero, got {value}")
+    return value
 
-# bind IP and port
-bind = '0.0.0.0:8000'
 
-# PID file path (used for stopping and restarting; do not remove)
-pidfile = '/www/wwwroot/dental-api/gunicorn.pid'
+APP_DIR = os.getenv("APP_DIR", "/www/wwwroot/dental-ai").rstrip("/")
+HOST = os.getenv("HOST", "127.0.0.1")
+PORT = _positive_int("PORT", 8001)
+WEB_CONCURRENCY = _positive_int("WEB_CONCURRENCY", 1)
+GUNICORN_TIMEOUT = _positive_int("GUNICORN_TIMEOUT", 300)
+GUNICORN_GRACEFUL_TIMEOUT = _positive_int("GUNICORN_GRACEFUL_TIMEOUT", 300)
+LOG_DIR = os.getenv("LOG_DIR", "/www/wwwlogs/python/dental-ai").rstrip("/")
 
-# access log and error log paths, file name do not change 'gunicorn_acess.log', 'gunicorn_error.log'
-accesslog = '/www/wwwlogs/python/dental-api/gunicorn_acess.log'
-errorlog = '/www/wwwlogs/python/dental-api/gunicorn_error.log'
+if PORT > 65535:
+    raise RuntimeError(f"PORT must be between 1 and 65535, got {PORT}")
 
-# Log level (this log level applies to the error log; the access log level cannot be configured)
-# debug: Debug level;
-# info: Normal level;
-# warning: Warning messages level;
-# error: Error level;
-# critical: Critical errors;
-loglevel = 'info'
+# Process and application settings
+chdir = APP_DIR
+bind = f"{HOST}:{PORT}"
+workers = WEB_CONCURRENCY
+threads = 1
+user = "www"
+worker_class = "uvicorn.workers.UvicornWorker"
+preload_app = False
 
-# Put custom settings here
-# It is best to follow the same format as above: <comment + newline + key = value>.
-# PS: Gunicorn configuration files are Python\-style (i.e., ".py" files); make sure to follow Python syntax.
-# For example: if a config value (such as loglevel) is a string, it must be enclosed in quotes.
-
-# worker timeout (seconds)
-timeout = 300
-
-# graceful shutdown timeout (seconds)
-graceful_timeout = 30
-
-# HTTP keep-alive timeout (seconds)
+# Lifecycle and connection settings
+timeout = GUNICORN_TIMEOUT
+graceful_timeout = GUNICORN_GRACEFUL_TIMEOUT
 keepalive = 75
-
-# auto-restart worker
 max_requests = 1000
 max_requests_jitter = 100
 
-
-# Chạy sau khi Gunicorn fork mỗi worker process.
-# Mỗi worker có HTTP connection pool riêng nên cần warm-up độc lập.
-def post_fork(server, worker):
-    import asyncio
-    import logging
-    import os
-    import sys
-
-    sys.path.insert(0, chdir)
-    os.chdir(chdir)
-
-    log = logging.getLogger("gunicorn.error")
-
-    async def _warmup():
-        try:
-            from openai import AsyncOpenAI
-            from src.config import LLM_ENGINE, OPENAI_API_KEY, OPENAI_CHAT_MODEL
-
-            if LLM_ENGINE != "openai":
-                return
-
-            client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-            t0 = asyncio.get_event_loop().time()
-            await client.chat.completions.create(
-                model=OPENAI_CHAT_MODEL,
-                messages=[{"role": "user", "content": "hi"}],
-                max_tokens=1,
-                temperature=0,
-            )
-            await client.close()
-            elapsed = asyncio.get_event_loop().time() - t0
-            log.info("[WORKER %s] LLM warm-up xong trong %.2fs", worker.pid, elapsed)
-        except Exception as exc:
-            log.warning("[WORKER %s] LLM warm-up thất bại (bỏ qua): %s", worker.pid, exc)
-
-    asyncio.run(_warmup())
+# Files and logging. The deploy runbook creates LOG_DIR before startup.
+pidfile = f"{APP_DIR}/gunicorn.pid"
+accesslog = f"{LOG_DIR}/gunicorn_access.log"
+errorlog = f"{LOG_DIR}/gunicorn_error.log"
+loglevel = os.getenv("LOG_LEVEL", "info").lower()
+capture_output = True

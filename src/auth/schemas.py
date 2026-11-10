@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 from typing import Optional
 
 
@@ -31,14 +31,12 @@ class Token(BaseModel):
 
 # Thông tin user
 class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     full_name: str
     email: str
     is_2fa_enabled: bool = False
-
-    # Cấu hình
-    class Config:
-        from_attributes = True
 
 
 # Cập nhật thông tin người dùng
